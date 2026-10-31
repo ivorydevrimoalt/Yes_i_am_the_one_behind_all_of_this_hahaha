@@ -5,7 +5,6 @@ import math
 import web
 import io
 import re
-import os
 
 # Route mapping: root redirects to bonziworld.kr, everything else goes to SexHack
 urls = (
@@ -16,7 +15,7 @@ urls = (
 app = web.application(urls, globals())
 web.config.debug = False
 host = "0.0.0.0"
-port = int(os.environ.get("PORT", 10000))
+port = 8000
 
 # Load default image into memory from file
 try:
@@ -25,9 +24,9 @@ try:
 except Exception:
     default_img = None
 
-# User-Agent for Tenor requests
+# User-Agent headers
 headers = {
-    'User-Agent': 'A Discord Bot by an unknown person using github.com/rebane2001/txnor-server',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
 }
 
 
@@ -56,19 +55,20 @@ class SexHack:
 
     @staticmethod
     def generate_spinning_gif(name):
-        """Play first half of Tenor GIF, spin/interrupt halfway, flash colors with text, and end on ubscene.gif"""
+        """Fetch Klipy GIF, play first half, spin/interrupt halfway, flash colors with text, and end on ubscene.gif"""
         try:
             parts = name.split('/')
             query = parts[-1] if len(parts) > 1 else name
             
-            url = f"https://tenor.com/view/{query}"
+            # Klipy URL pattern
+            url = f"https://klipy.com/gif/{query}"
             r = requests.get(url, headers=headers, timeout=5)
             
+            # Scrape Klipy media URL from meta tags
             img_url = None
             for pattern in [
                 r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
-                r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
-                r'<meta class="dynamic" name="twitter:image" content="([^"]+)">'
+                r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']'
             ]:
                 match = re.search(pattern, r.text)
                 if match:
@@ -76,15 +76,13 @@ class SexHack:
                     break
             
             if not img_url:
-                print(f"Tenor image URL not found for query: {query}")
+                print(f"Klipy image URL not found for query: {query}")
                 return None
 
-            img_url = img_url.replace("AAC/", "AAe/")
             img_raw = requests.get(img_url, stream=True, headers=headers, timeout=5).raw
-
             og_gif = Image.open(img_raw)
 
-            # Extract frames from the animated Tenor GIF
+            # Extract frames from the animated Klipy GIF
             gif_frames = []
             try:
                 for frame in ImageSequence.Iterator(og_gif):
@@ -100,7 +98,7 @@ class SexHack:
             if interrupt_idx < 1:
                 interrupt_idx = 1
 
-            # Phase 1A: Play the first half of the Tenor GIF normally
+            # Phase 1A: Play the first half of the Klipy GIF normally
             for idx in range(interrupt_idx):
                 base_img = gif_frames[idx]
                 canvas = Image.new("RGBA", (width, height), (255, 255, 255, 255))
@@ -177,7 +175,7 @@ class SexHack:
             web.header('Content-type', 'image/gif')
             return out.getvalue()
         except Exception as e:
-            print(f"Error generating spinning GIF: {e}")
+            print(f"Error generating spinning GIF from Klipy: {e}")
             return None
 
     def handle_request(self, name):
@@ -194,7 +192,7 @@ class SexHack:
         """Handle a request with Discord bot scraper detection"""
         user_agent = web.ctx.env.get('HTTP_USER_AGENT', '')
         
-        # If Discord's scraper requests the preview, give it a static image so the embed looks correct
+        # Serve static image for Discord preview embeds so they look clean
         if 'Discordbot' in user_agent:
             web.header('Content-type', 'image/png')
             return self.default_response()
