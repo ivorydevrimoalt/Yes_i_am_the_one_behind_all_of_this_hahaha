@@ -6,7 +6,7 @@ import web
 import io
 import re
 
-# Route mapping: root redirects, aplle-ub uses a relaxed catch-all for full URLs, default handles view/vixw klipy links
+# Route mapping: root redirects, aplle-ub handles direct URLs, default handles view/vixw klipy links
 urls = (
     '/', 'RedirectToBonzi',
     '/aplle-ub/(.*)', 'AppleUbHandler',
@@ -38,24 +38,24 @@ class RedirectToBonzi:
 
 class AppleUbHandler:
     def GET(self, target_path):
-        """Handle /aplle-ub/ path for direct image and video URLs regardless of slashes/dots"""
+        """Handle /aplle-ub/ path for direct image and video URLs"""
         web.header('Cache-Control', 'public, max-age=86400')
         
-        # web.py sometimes splits or cuts path segments with dots; grab full path from env if needed
         full_path = web.ctx.env.get('REQUEST_URI', '')
         if '/aplle-ub/' in full_path:
             target_url = full_path.split('/aplle-ub/', 1)[1]
         else:
             target_url = target_path
 
-        # Normalize target URL if protocol was omitted
         if target_url and not target_url.startswith('http'):
             target_url = 'https://' + target_url
 
         if not target_url:
+            print("AppleUbHandler: No target URL provided.")
             web.header('Content-type', 'image/png')
             return SexHack.default_response()
 
+        print(f"Fetching media from URL: {target_url}")
         is_video = any(target_url.lower().split('?')[0].endswith(ext) for ext in ['.mp4', '.webm', '.mov', '.avi', '.m4v'])
         
         if is_video:
@@ -68,6 +68,7 @@ class AppleUbHandler:
         if result:
             return result
         
+        print("AppleUbHandler: Processing failed, returning default.")
         web.header('Content-type', 'image/png')
         return SexHack.default_response()
 
@@ -75,12 +76,13 @@ class AppleUbHandler:
         """Process direct image/GIF URL with sine-wave flashing and ubscene.gif end"""
         try:
             r = requests.get(url, headers=headers, stream=True, timeout=10)
+            r.raise_for_status()
             img_data = io.BytesIO(r.content)
             
             try:
                 og_media = Image.open(img_data)
             except Exception as e:
-                print(f"Failed to open image from URL {url}: {e}")
+                print(f"PIL failed to open image from URL {url}: {e}")
                 return None
 
             frames = []
@@ -181,7 +183,7 @@ class AppleUbHandler:
             )
             return out.getvalue()
         except Exception as e:
-            print(f"Error processing media URL: {e}")
+            print(f"Error processing media URL {url}: {e}")
             return None
 
     def process_video(self, url):
@@ -192,9 +194,13 @@ class AppleUbHandler:
             return ub_video
         except Exception as e:
             print(f"Could not load img/ubscene.mp4: {e}")
-            # Fallback to downloading source video if ubscene.mp4 is missing
-            r = requests.get(url, headers=headers, stream=True, timeout=10)
-            return r.content
+            try:
+                r = requests.get(url, headers=headers, stream=True, timeout=10)
+                r.raise_for_status()
+                return r.content
+            except Exception as ex:
+                print(f"Failed to fallback download video: {ex}")
+                return None
 
 
 class SexHack:
@@ -222,6 +228,7 @@ class SexHack:
             
             url = f"https://klipy.com/gif/{query}"
             r = requests.get(url, headers=headers, timeout=5)
+            r.raise_for_status()
             
             img_url = None
             for pattern in [
@@ -234,6 +241,7 @@ class SexHack:
                     break
             
             if not img_url:
+                print("Klipy image URL not found.")
                 return None
 
             img_raw = requests.get(img_url, stream=True, headers=headers, timeout=5).raw
