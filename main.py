@@ -6,7 +6,7 @@ import web
 import io
 import re
 
-# Route mapping: root redirects, aplle-ub handles direct media URLs, default handles view/vixw klipy links
+# Route mapping: root redirects, aplle-ub uses a relaxed catch-all for full URLs, default handles view/vixw klipy links
 urls = (
     '/', 'RedirectToBonzi',
     '/aplle-ub/(.*)', 'AppleUbHandler',
@@ -37,22 +37,33 @@ class RedirectToBonzi:
 
 
 class AppleUbHandler:
-    def GET(self, target_url):
-        """Handle /aplle-ub/ path for direct image and video URLs"""
+    def GET(self, target_path):
+        """Handle /aplle-ub/ path for direct image and video URLs regardless of slashes/dots"""
         web.header('Cache-Control', 'public, max-age=86400')
         
+        # web.py sometimes splits or cuts path segments with dots; grab full path from env if needed
+        full_path = web.ctx.env.get('REQUEST_URI', '')
+        if '/aplle-ub/' in full_path:
+            target_url = full_path.split('/aplle-ub/', 1)[1]
+        else:
+            target_url = target_path
+
         # Normalize target URL if protocol was omitted
-        if not target_url.startswith('http'):
+        if target_url and not target_url.startswith('http'):
             target_url = 'https://' + target_url
 
-        is_video = any(target_url.lower().endswith(ext) for ext in ['.mp4', '.webm', '.mov', '.avi', '.m4v'])
+        if not target_url:
+            web.header('Content-type', 'image/png')
+            return SexHack.default_response()
+
+        is_video = any(target_url.lower().split('?')[0].endswith(ext) for ext in ['.mp4', '.webm', '.mov', '.avi', '.m4v'])
         
         if is_video:
             web.header('Content-type', 'video/mp4')
             result = self.process_video(target_url)
         else:
             web.header('Content-type', 'image/gif')
-            result = self.process_media(target_url, is_video=False)
+            result = self.process_media(target_url)
 
         if result:
             return result
@@ -60,7 +71,7 @@ class AppleUbHandler:
         web.header('Content-type', 'image/png')
         return SexHack.default_response()
 
-    def process_media(self, url, is_video=False):
+    def process_media(self, url):
         """Process direct image/GIF URL with sine-wave flashing and ubscene.gif end"""
         try:
             r = requests.get(url, headers=headers, stream=True, timeout=10)
@@ -68,13 +79,13 @@ class AppleUbHandler:
             
             try:
                 og_media = Image.open(img_data)
-            except Exception:
+            except Exception as e:
+                print(f"Failed to open image from URL {url}: {e}")
                 return None
 
             frames = []
             width, height = 350, 185
 
-            # Extract frames
             media_frames = []
             try:
                 for frame in ImageSequence.Iterator(og_media):
@@ -156,8 +167,8 @@ class AppleUbHandler:
                 ub_gif = Image.open(io.BytesIO(ub_raw))
                 for frame in ImageSequence.Iterator(ub_gif):
                     frames.append(frame.convert("RGBA").resize((width, height)))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Could not load img/ubscene.gif: {e}")
 
             out = io.BytesIO()
             frames[0].save(
@@ -174,27 +185,21 @@ class AppleUbHandler:
             return None
 
     def process_video(self, url):
-        """Process direct video URL for aplle-ub, returning ubscene.mp4 at the end"""
+        """Process direct video URL for aplle-ub, returning ubscene.mp4 bytes"""
         try:
-            r = requests.get(url, headers=headers, stream=True, timeout=10)
-            video_bytes = r.content
-
-            # If user requested a video variant, append/fallback to ubscene.mp4 bytes
-            try:
-                with open("img/ubscene.mp4", "rb") as f:
-                    ub_video = f.read()
-                return ub_video
-            except Exception:
-                return video_bytes
+            with open("img/ubscene.mp4", "rb") as f:
+                ub_video = f.read()
+            return ub_video
         except Exception as e:
-            print(f"Error processing video URL: {e}")
-            return None
+            print(f"Could not load img/ubscene.mp4: {e}")
+            # Fallback to downloading source video if ubscene.mp4 is missing
+            r = requests.get(url, headers=headers, stream=True, timeout=10)
+            return r.content
 
 
 class SexHack:
     @staticmethod
     def default_response():
-        """Return default image from file if available, otherwise generate programmatically"""
         if default_img:
             return default_img
         img = Image.new("RGBA", (350, 185), (220, 220, 220, 255))
@@ -211,7 +216,6 @@ class SexHack:
 
     @staticmethod
     def generate_spinning_gif(name):
-        """Fetch Klipy GIF, play first half, spin/interrupt halfway, flash colors with text, and end on ubscene.gif"""
         try:
             parts = name.split('/')
             query = parts[-1] if len(parts) > 1 else name
@@ -230,7 +234,6 @@ class SexHack:
                     break
             
             if not img_url:
-                print(f"Klipy image URL not found for query: {query}")
                 return None
 
             img_raw = requests.get(img_url, stream=True, headers=headers, timeout=5).raw
@@ -301,8 +304,7 @@ class SexHack:
                 ub_gif = Image.open(io.BytesIO(ub_raw))
                 for frame in ImageSequence.Iterator(ub_gif):
                     frames.append(frame.convert("RGBA").resize((width, height)))
-            except Exception as e:
-                print(f"Could not load img/ubscene.gif: {e}")
+            except Exception:
                 final_slide = Image.new("RGBA", (width, height), (255, 255, 255, 255))
                 draw = ImageDraw.Draw(final_slide)
                 draw.multiline_text((width / 2, height / 2), message, fill=(0, 0, 0), font=font, anchor="mm", align="center")
@@ -326,17 +328,13 @@ class SexHack:
     def handle_request(self, name):
         try:
             web.header('Cache-Control', 'public, max-age=86400')
-
             if re.search(r'^/?vi[ex]w/[A-Za-z0-9_-]*$', name):
                 return self.generate_spinning_gif(name)
-
         except Exception as e:
             print(f"Handle request error: {e}")
 
     def GET(self, name):
-        """Handle a request with Discord bot scraper detection"""
         user_agent = web.ctx.env.get('HTTP_USER_AGENT', '')
-        
         if 'Discordbot' in user_agent:
             web.header('Content-type', 'image/png')
             return self.default_response()
