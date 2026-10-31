@@ -1,110 +1,197 @@
-import os
+from PIL import Image, ImageFont, ImageDraw, ImageSequence
 import requests
-from flask import Flask, render_template, request, send_from_directory, redirect, url_for
-from PIL import Image, ImageOps
-from io import BytesIO
+import random
+import math
+import web
+import io
+import re
 
-app = Flask(__name__)
+app = web.application(('(.*)', 'UbHack'), globals())
+web.config.debug = False
+host = "127.0.0.1"
+port = 8000
 
-# Folders setup
-HTMLS_FOLDER = os.path.join(os.path.dirname(__file__), 'htmls')
-CACHE_FOLDER = os.path.join(os.path.dirname(__file__), 'static', 'generated')
-os.makedirs(HTMLS_FOLDER, exist_ok=True)
-os.makedirs(CACHE_FOLDER, exist_ok=True)
+# Load default image into memory from file
+try:
+    with open("img/ububnut.png", "rb") as f:
+        default_img = f.read()
+except Exception:
+    default_img = None
 
-app.config['HTMLS_FOLDER'] = HTMLS_FOLDER
+# User-Agent for Tenor requests
+headers = {
+    'User-Agent': 'please join bonziworld.kr im doing what famous people in 2023 did to get this site more attention',
+}
 
-@app.route('/')
-def index():
-    return "Flask Discord Embed Server is Running!"
 
-# --- Dynamic Image Generation Helpers ---
-def process_image(img_url, effect_type):
-    try:
-        response = requests.get(img_url, timeout=5)
-        img = Image.open(BytesIO(response.content)).convert("RGB")
-    except Exception:
-        # Fallback image if download fails
-        img = Image.new("RGB", (300, 300), color=(73, 109, 137))
-
-    if effect_type == 'e':
-        # Mild/Standard Variant: Pixelation, Color Inversion, text "38"
-        # Pixelate by scaling down and back up using NEAREST
-        small = img.resize((img.width // 12, img.height // 12), resample=Image.Resampling.NEAREST)
-        img = small.resize(img.size, resample=Image.Resampling.NEAREST)
+class SexHack:
+    @staticmethod
+    def default_response():
+        """Return default image from file if available, otherwise generate programmatically"""
+        if default_img:
+            return default_img
+        img = Image.new("RGBA", (350, 185), (220, 220, 220, 255))
+        draw = ImageDraw.Draw(img)
+        try:
+            font = ImageFont.truetype("impact.ttf", 28)
+        except IOError:
+            font = ImageFont.load_default()
+        draw.text((350 / 2, 185 / 2), "DEFAULT", fill=(80, 80, 80), font=font, anchor="mm")
         
-        # Invert colors
-        img = ImageOps.invert(img)
-        
-    elif effect_type == 'x':
-        # Worse Variant: Extreme pixelation, heavy deep-fry effect, inverted, text "ON TOP BRO SAID S/E/X TOO"
-        small = img.resize((img.width // 24, img.height // 24), resample=Image.Resampling.NEAREST)
-        img = small.resize(img.size, resample=Image.Resampling.NEAREST)
-        
-        # Invert and posterize/enhance contrast
-        img = ImageOps.invert(img)
-        img = ImageOps.posterize(img, 2)
+        out = io.BytesIO()
+        img.save(out, "PNG")
+        return out.getvalue()
 
-    # Save processed image to cache
-    output_filename = f"processed_{effect_type}_{abs(hash(img_url))}.png"
-    output_path = os.path.join(CACHE_FOLDER, output_filename)
-    img.save(output_path, "PNG")
-    
-    return url_for('static', filename=f'generated/{output_filename}', _external=True)
+    @staticmethod
+    def generate_spinning_gif(name):
+        """Play first half of Tenor GIF, spin/interrupt halfway, flash colors with text, and end on ubscene.gif"""
+        try:
+            parts = name.split('/')
+            query = parts[-1] if len(parts) > 1 else name
+            
+            url = f"https://tenor.com/view/{query}"
+            r = requests.get(url, headers=headers, timeout=5)
+            
+            img_url = None
+            for pattern in [
+                r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+                r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
+                r'<meta class="dynamic" name="twitter:image" content="([^"]+)">'
+            ]:
+                match = re.search(pattern, r.text)
+                if match:
+                    img_url = match.group(1)
+                    break
+            
+            if not img_url:
+                print(f"Tenor image URL not found for query: {query}")
+                return None
 
-# --- Wildcard Route Handler ---
-# Handles any deep paths like /e/klipy.com/gifs/... or /x/htsrh/hstrh/... or ./e/3/ddddddd/...
-@app.route('/<path:subpath>')
-def catch_all(subpath):
-    segments = subpath.strip('/').split('/')
-    if not segments:
-        return redirect(url_for('index'))
-    
-    mode = segments[0].lower() # Expecting 'e' or 'x' (or redirects anything else)
-    
-    if mode == 'e':
-        text_overlay = "38"
-        template_name = "template_e.html"
-        # Extract remaining path as the target asset reference if present
-        target_path = "/".join(segments[1:]) if len(segments) > 1 else "default"
-        # Construct source image URL (e.g., from klipy or a placeholder)
-        img_source = f"https://{target_path}" if "klipy.com" in target_path else "https://media.klipy.com/gifs/sailor-moon-love-15.gif"
-        
-        processed_image_url = process_image(img_source, 'e')
-        
-        return render_template(
-            template_name, 
-            image_url=processed_image_url, 
-            overlay_text=text_overlay,
-            redirect_url=url_for('discord_replace_via_msg', _external=True)
-        )
-        
-    elif mode == 'x':
-        text_overlay = "ON TOP BRO SAID S/E/X TOO"
-        template_name = "template_x.html"
-        target_path = "/".join(segments[1:]) if len(segments) > 1 else "default"
-        img_source = f"https://{target_path}" if "klipy.com" in target_path else "https://media.klipy.com/gifs/sailor-moon-love-15.gif"
-        
-        processed_image_url = process_image(img_source, 'x')
-        
-        return render_template(
-            template_name, 
-            image_url=processed_image_url, 
-            overlay_text=text_overlay,
-            redirect_url=url_for('discord_replace_via_msg', _external=True)
-        )
-    else:
-        # Fallback / General catch-all redirection to target endpoint
-        return redirect(url_for('discord_replace_via_msg'))
+            img_url = img_url.replace("AAC/", "AAe/")
+            img_raw = requests.get(img_url, stream=True, headers=headers, timeout=5).raw
 
-@app.route('/discord_replace_via_msg')
-def discord_replace_via_msg():
-    return render_template('index.html', message="Redirected via Discord substitute mechanism handler.")
+            og_gif = Image.open(img_raw)
 
-# Serve files inside the local 'htmls' folder if requested directly
-@app.route('/htmls/<path:filename>')
-def serve_html_folder(filename):
-    return send_from_directory(app.config['HTMLS_FOLDER'], filename)
+            # Extract frames from the animated Tenor GIF
+            gif_frames = []
+            try:
+                for frame in ImageSequence.Iterator(og_gif):
+                    gif_frames.append(frame.convert("RGBA").resize((350, 185)))
+            except Exception:
+                gif_frames = [og_gif.convert("RGBA").resize((350, 185))]
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+            width, height = 350, 185
+            frames = []
+
+            # Interrupt halfway through the GIF frames
+            interrupt_idx = len(gif_frames) // 2
+            if interrupt_idx < 1:
+                interrupt_idx = 1
+
+            # Phase 1A: Play the first half of the Tenor GIF normally (no spinning, just regular frames)
+            for idx in range(interrupt_idx):
+                base_img = gif_frames[idx]
+                canvas = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+                canvas.paste(base_img, (0, 0), base_img)
+                frames.append(canvas)
+
+            # Phase 1B: Spin/interrupt the final frame of that first half up to 90 degrees
+            spin_steps = 10
+            last_half_frame = gif_frames[interrupt_idx - 1]
+            for idx in range(spin_steps):
+                angle = (idx / max(1, spin_steps - 1)) * (math.pi / 2)
+                
+                cos_a = math.cos(angle)
+                sin_a = math.sin(angle)
+                if cos_a < 0.02:
+                    cos_a = 0.02
+
+                cx, cy = width / 2, height / 2
+                hw = (width / 2) * cos_a
+                v_skew = sin_a * 25
+
+                quad = (
+                    cx - hw, v_skew,
+                    cx - hw, height - v_skew,
+                    cx + hw, height + v_skew,
+                    cx + hw, -v_skew
+                )
+
+                canvas = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+                transformed = last_half_frame.transform((width, height), Image.QUAD, quad, Image.BICUBIC)
+                canvas.paste(transformed, (0, 0), transformed)
+                frames.append(canvas)
+
+            # Phase 2: Flash colors and text for 100 frames
+            try:
+                font = ImageFont.truetype("impact.ttf", 18)
+            except IOError:
+                font = ImageFont.load_default()
+
+            message = "Fuck you,\nget Ub Ored,\nUB ORE UB PEAK!\n#UbOre #UbPeak"
+
+            for _ in range(100):
+                bg_color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255), 255)
+                text_color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255), 255)
+
+                flash_slide = Image.new("RGBA", (width, height), bg_color)
+                draw = ImageDraw.Draw(flash_slide)
+                draw.multiline_text((width / 2, height / 2), message, fill=text_color, font=font, anchor="mm", align="center")
+                frames.append(flash_slide)
+
+            # Phase 3: Switch to img/ubscene.gif and end there
+            try:
+                with open("img/ubscene.gif", "rb") as f:
+                    ub_raw = f.read()
+                ub_gif = Image.open(io.BytesIO(ub_raw))
+                for frame in ImageSequence.Iterator(ub_gif):
+                    frames.append(frame.convert("RGBA").resize((width, height)))
+            except Exception as e:
+                print(f"Could not load img/ubscene.gif: {e}")
+                final_slide = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+                draw = ImageDraw.Draw(final_slide)
+                draw.multiline_text((width / 2, height / 2), message, fill=(0, 0, 0), font=font, anchor="mm", align="center")
+                frames.append(final_slide)
+
+            out = io.BytesIO()
+            # Omitting loop=1 / loop=0 entirely so Pillow leaves out the Netscape loop extension, 
+            # which forces standard single-play behavior across compliant viewers.
+            frames[0].save(
+                out,
+                format="GIF",
+                save_all=True,
+                append_images=frames[1:],
+                duration=40,
+                optimize=True
+            )
+            web.header('Content-type', 'image/gif')
+            return out.getvalue()
+        except Exception as e:
+            print(f"Error generating spinning GIF: {e}")
+            return None
+
+    def handle_request(self, name):
+        try:
+            web.header('Cache-Control', 'public, max-age=86400')
+
+            if re.search(r'^/?vi[ex]w/[A-Za-z0-9_-]*$', name):
+                return self.generate_spinning_gif(name)
+
+        except Exception as e:
+            print(f"Handle request error: {e}")
+
+    def GET(self, name):
+        """Handle a request"""
+        web.header('Content-type', 'image/png')
+        filtered_name = re.sub(r'[^\.\/A-Za-z0-9_-]+', '', name)
+        filtered_name = re.sub(r'^/?xn-../view', '/vixw', filtered_name)
+        filtered_name = re.sub(r'^/?([A-Za-z-]*/)?vi', '/vi', filtered_name)
+        
+        response = self.handle_request(filtered_name)
+        if response:
+            return response
+        return self.default_response()
+
+
+if __name__ == "__main__":
+    web.httpserver.runsimple(app.wsgifunc(), (host, port))
