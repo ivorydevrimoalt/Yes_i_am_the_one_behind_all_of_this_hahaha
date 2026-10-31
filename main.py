@@ -6,7 +6,13 @@ import web
 import io
 import re
 
-app = web.application(('(.*)', 'SexHack'), globals())
+# Route mapping: root redirects to bonziworld.kr, everything else goes to SexHack
+urls = (
+    '/', 'RedirectToBonzi',
+    '(.+)', 'SexHack'
+)
+
+app = web.application(urls, globals())
 web.config.debug = False
 host = "127.0.0.1"
 port = 8000
@@ -22,6 +28,11 @@ except Exception:
 headers = {
     'User-Agent': 'A Discord Bot by an unknown person using github.com/rebane2001/txnor-server',
 }
+
+
+class RedirectToBonzi:
+    def GET(self):
+        raise web.seeother('https://bonziworld.kr')
 
 
 class SexHack:
@@ -88,7 +99,7 @@ class SexHack:
             if interrupt_idx < 1:
                 interrupt_idx = 1
 
-            # Phase 1A: Play the first half of the Tenor GIF normally (no spinning, just regular frames)
+            # Phase 1A: Play the first half of the Tenor GIF normally
             for idx in range(interrupt_idx):
                 base_img = gif_frames[idx]
                 canvas = Image.new("RGBA", (width, height), (255, 255, 255, 255))
@@ -154,8 +165,6 @@ class SexHack:
                 frames.append(final_slide)
 
             out = io.BytesIO()
-            # Omitting loop=1 / loop=0 entirely so Pillow leaves out the Netscape loop extension, 
-            # which forces standard single-play behavior across compliant viewers.
             frames[0].save(
                 out,
                 format="GIF",
