@@ -6,21 +6,21 @@ import web
 import io
 import re
 
-app = web.application(('(.*)', 'UbHack'), globals())
+app = web.application(('(.*)', 'SexHack'), globals())
 web.config.debug = False
 host = "127.0.0.1"
 port = 8000
 
 # Load default image into memory from file
 try:
-    with open("img/ububnut.png", "rb") as f:
+    with open("img/sex_default.png", "rb") as f:
         default_img = f.read()
 except Exception:
     default_img = None
 
 # User-Agent for Tenor requests
 headers = {
-    'User-Agent': 'please join bonziworld.kr im doing what famous people in 2023 did to get this site more attention',
+    'User-Agent': 'A Discord Bot by an unknown person using github.com/rebane2001/txnor-server',
 }
 
 
