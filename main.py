@@ -6,15 +6,16 @@ import web
 import io
 import re
 
-# Route mapping: root redirects to bonziworld.kr, everything else goes to SexHack
+# Route mapping: root redirects, aplle-ub handles direct media URLs, default handles view/vixw klipy links
 urls = (
     '/', 'RedirectToBonzi',
+    '/aplle-ub/(.*)', 'AppleUbHandler',
     '(.+)', 'SexHack'
 )
 
 app = web.application(urls, globals())
 web.config.debug = False
-host = "0.0.0.0"
+host = "127.0.0.1"
 port = 8000
 
 # Load default image into memory from file
@@ -33,6 +34,161 @@ headers = {
 class RedirectToBonzi:
     def GET(self):
         raise web.seeother('https://bonziworld.kr')
+
+
+class AppleUbHandler:
+    def GET(self, target_url):
+        """Handle /aplle-ub/ path for direct image and video URLs"""
+        web.header('Cache-Control', 'public, max-age=86400')
+        
+        # Normalize target URL if protocol was omitted
+        if not target_url.startswith('http'):
+            target_url = 'https://' + target_url
+
+        is_video = any(target_url.lower().endswith(ext) for ext in ['.mp4', '.webm', '.mov', '.avi', '.m4v'])
+        
+        if is_video:
+            web.header('Content-type', 'video/mp4')
+            result = self.process_video(target_url)
+        else:
+            web.header('Content-type', 'image/gif')
+            result = self.process_media(target_url, is_video=False)
+
+        if result:
+            return result
+        
+        web.header('Content-type', 'image/png')
+        return SexHack.default_response()
+
+    def process_media(self, url, is_video=False):
+        """Process direct image/GIF URL with sine-wave flashing and ubscene.gif end"""
+        try:
+            r = requests.get(url, headers=headers, stream=True, timeout=10)
+            img_data = io.BytesIO(r.content)
+            
+            try:
+                og_media = Image.open(img_data)
+            except Exception:
+                return None
+
+            frames = []
+            width, height = 350, 185
+
+            # Extract frames
+            media_frames = []
+            try:
+                for frame in ImageSequence.Iterator(og_media):
+                    media_frames.append(frame.convert("RGBA").resize((width, height)))
+            except Exception:
+                media_frames = [og_media.convert("RGBA").resize((width, height))]
+
+            interrupt_idx = len(media_frames) // 2
+            if interrupt_idx < 1:
+                interrupt_idx = 1
+
+            # Phase 1A: Play first half normally
+            for idx in range(interrupt_idx):
+                base_img = media_frames[idx]
+                canvas = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+                canvas.paste(base_img, (0, 0), base_img)
+                frames.append(canvas)
+
+            # Phase 1B: Spin/interrupt final frame up to 90 degrees
+            spin_steps = 10
+            last_half_frame = media_frames[interrupt_idx - 1]
+            for idx in range(spin_steps):
+                angle = (idx / max(1, spin_steps - 1)) * (math.pi / 2)
+                cos_a = max(0.02, math.cos(angle))
+                sin_a = math.sin(angle)
+
+                cx, cy = width / 2, height / 2
+                hw = (width / 2) * cos_a
+                v_skew = sin_a * 25
+
+                quad = (
+                    cx - hw, v_skew,
+                    cx - hw, height - v_skew,
+                    cx + hw, height + v_skew,
+                    cx + hw, -v_skew
+                )
+
+                canvas = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+                transformed = last_half_frame.transform((width, height), Image.QUAD, quad, Image.BICUBIC)
+                canvas.paste(transformed, (0, 0), transformed)
+                frames.append(canvas)
+
+            # Phase 2: Color flashing with random sine wave distortions per frame
+            try:
+                font = ImageFont.truetype("impact.ttf", 18)
+            except IOError:
+                font = ImageFont.load_default()
+
+            message = "Fuck you,\nget Ub Ored,\nUB ORE UB PEAK!\n#UbOre #UbPeak"
+
+            for i in range(100):
+                bg_color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255), 255)
+                text_color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255), 255)
+
+                slide = Image.new("RGBA", (width, height), bg_color)
+                draw = ImageDraw.Draw(slide)
+                draw.multiline_text((width / 2, height / 2), message, fill=text_color, font=font, anchor="mm", align="center")
+                
+                # Apply random sine wave distortion effect across columns
+                px = slide.load()
+                amp = random.randint(2, 6)
+                freq = random.uniform(0.05, 0.2)
+                phase = i * 0.5
+                
+                temp_img = slide.copy()
+                tpx = temp_img.load()
+                for y in range(height):
+                    shift = int(math.sin(y * freq + phase) * amp)
+                    for x in range(width):
+                        src_x = (x + shift) % width
+                        px[x, y] = tpx[src_x, y]
+
+                frames.append(slide)
+
+            # Phase 3: End on img/ubscene.gif
+            try:
+                with open("img/ubscene.gif", "rb") as f:
+                    ub_raw = f.read()
+                ub_gif = Image.open(io.BytesIO(ub_raw))
+                for frame in ImageSequence.Iterator(ub_gif):
+                    frames.append(frame.convert("RGBA").resize((width, height)))
+            except Exception:
+                pass
+
+            out = io.BytesIO()
+            frames[0].save(
+                out,
+                format="GIF",
+                save_all=True,
+                append_images=frames[1:],
+                duration=40,
+                optimize=True
+            )
+            return out.getvalue()
+        except Exception as e:
+            print(f"Error processing media URL: {e}")
+            return None
+
+    def process_video(self, url):
+        """Process direct video URL for aplle-ub, returning ubscene.mp4 at the end"""
+        try:
+            r = requests.get(url, headers=headers, stream=True, timeout=10)
+            video_bytes = r.content
+
+            # If user requested a video variant, append/fallback to ubscene.mp4 bytes
+            try:
+                with open("img/ubscene.mp4", "rb") as f:
+                    ub_video = f.read()
+                return ub_video
+            except Exception:
+                return video_bytes
+        except Exception as e:
+            print(f"Error processing video URL: {e}")
+            return None
 
 
 class SexHack:
@@ -60,11 +216,9 @@ class SexHack:
             parts = name.split('/')
             query = parts[-1] if len(parts) > 1 else name
             
-            # Klipy URL pattern
             url = f"https://klipy.com/gif/{query}"
             r = requests.get(url, headers=headers, timeout=5)
             
-            # Scrape Klipy media URL from meta tags
             img_url = None
             for pattern in [
                 r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
@@ -82,7 +236,6 @@ class SexHack:
             img_raw = requests.get(img_url, stream=True, headers=headers, timeout=5).raw
             og_gif = Image.open(img_raw)
 
-            # Extract frames from the animated Klipy GIF
             gif_frames = []
             try:
                 for frame in ImageSequence.Iterator(og_gif):
@@ -93,28 +246,22 @@ class SexHack:
             width, height = 350, 185
             frames = []
 
-            # Interrupt halfway through the GIF frames
             interrupt_idx = len(gif_frames) // 2
             if interrupt_idx < 1:
                 interrupt_idx = 1
 
-            # Phase 1A: Play the first half of the Klipy GIF normally
             for idx in range(interrupt_idx):
                 base_img = gif_frames[idx]
                 canvas = Image.new("RGBA", (width, height), (255, 255, 255, 255))
                 canvas.paste(base_img, (0, 0), base_img)
                 frames.append(canvas)
 
-            # Phase 1B: Spin/interrupt the final frame of that first half up to 90 degrees
             spin_steps = 10
             last_half_frame = gif_frames[interrupt_idx - 1]
             for idx in range(spin_steps):
                 angle = (idx / max(1, spin_steps - 1)) * (math.pi / 2)
-                
-                cos_a = math.cos(angle)
+                cos_a = max(0.02, math.cos(angle))
                 sin_a = math.sin(angle)
-                if cos_a < 0.02:
-                    cos_a = 0.02
 
                 cx, cy = width / 2, height / 2
                 hw = (width / 2) * cos_a
@@ -132,7 +279,6 @@ class SexHack:
                 canvas.paste(transformed, (0, 0), transformed)
                 frames.append(canvas)
 
-            # Phase 2: Flash colors and text for 100 frames
             try:
                 font = ImageFont.truetype("impact.ttf", 18)
             except IOError:
@@ -149,7 +295,6 @@ class SexHack:
                 draw.multiline_text((width / 2, height / 2), message, fill=text_color, font=font, anchor="mm", align="center")
                 frames.append(flash_slide)
 
-            # Phase 3: Switch to img/ubscene.gif and end there
             try:
                 with open("img/ubscene.gif", "rb") as f:
                     ub_raw = f.read()
@@ -192,7 +337,6 @@ class SexHack:
         """Handle a request with Discord bot scraper detection"""
         user_agent = web.ctx.env.get('HTTP_USER_AGENT', '')
         
-        # Serve static image for Discord preview embeds so they look clean
         if 'Discordbot' in user_agent:
             web.header('Content-type', 'image/png')
             return self.default_response()
