@@ -5,6 +5,7 @@ import math
 import web
 import io
 import re
+import os
 
 # Route mapping: root redirects to bonziworld.kr, everything else goes to SexHack
 urls = (
@@ -15,7 +16,7 @@ urls = (
 app = web.application(urls, globals())
 web.config.debug = False
 host = "127.0.0.1"
-port = 8000
+port = int(os.environ.get("PORT", 10000))
 
 # Load default image into memory from file
 try:
