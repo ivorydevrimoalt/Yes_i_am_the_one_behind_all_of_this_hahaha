@@ -191,7 +191,14 @@ class SexHack:
             print(f"Handle request error: {e}")
 
     def GET(self, name):
-        """Handle a request"""
+        """Handle a request with Discord bot scraper detection"""
+        user_agent = web.ctx.env.get('HTTP_USER_AGENT', '')
+        
+        # If Discord's scraper requests the preview, give it a static image so the embed looks correct
+        if 'Discordbot' in user_agent:
+            web.header('Content-type', 'image/png')
+            return self.default_response()
+
         web.header('Content-type', 'image/png')
         filtered_name = re.sub(r'[^\.\/A-Za-z0-9_-]+', '', name)
         filtered_name = re.sub(r'^/?xn-../view', '/vixw', filtered_name)
