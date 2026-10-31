@@ -15,7 +15,7 @@ urls = (
 
 app = web.application(urls, globals())
 web.config.debug = False
-host = "127.0.0.1"
+host = "0.0.0.0"
 port = int(os.environ.get("PORT", 10000))
 
 # Load default image into memory from file
